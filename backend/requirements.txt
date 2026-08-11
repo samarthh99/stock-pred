@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-multipart
+sqlalchemy
+pymysql
+passlib[bcrypt]
+python-jose[cryptography]
+yfinance
+tensorflow
+stable-baselines3
+gymnasium
+pandas
+numpy
+scikit-learn
