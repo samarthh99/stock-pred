@@ -6,7 +6,7 @@ pymysql
 passlib[bcrypt]
 python-jose[cryptography]
 yfinance
-tensorflow
+tensorflow==2.15.0
 stable-baselines3
 gymnasium
 pandas
