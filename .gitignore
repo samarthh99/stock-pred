@@ -1,0 +1,15 @@
+# macOS junk
+.DS_Store
+
+# Environment & secrets
+.env
+*.pem
+*.key
+
+# Model files (will be downloaded at runtime)
+paper_results/
+*.keras
+*.zip
+*.pkl
+*.h5
+*.hdf5
