@@ -15,6 +15,11 @@ from stable_baselines3 import PPO
 import warnings
 warnings.filterwarnings('ignore')
 
+# ---------- Add these new imports ----------
+import requests
+from pathlib import Path
+import shutil
+
 # ---------- Local imports ----------
 from database import SessionLocal, engine, Base
 from models import User, TradingSession
@@ -93,16 +98,53 @@ def engineer_features_no_lookahead(df):
     df = df.replace([np.inf, -np.inf], np.nan).dropna()
     return df
 
-# ---------- Load Models ----------
-MODEL_PATH = "paper_results/cnn_bilstm_att_model.keras"
-SCALER_PATH = "paper_results/scalers.pkl"
-FEATURE_COLS_PATH = "paper_results/feature_cols.pkl"
-PPO_PATH = "paper_results/ppo_agent.zip"
+# ============================================================
+# NEW: Download models from Hugging Face if missing
+# ============================================================
+MODEL_DIR = Path("paper_results")
+MODEL_DIR.mkdir(exist_ok=True)
 
-model = keras.models.load_model(MODEL_PATH, custom_objects={'AttentionLayer': AttentionLayer})
+# Replace with your actual Hugging Face repo URL
+HF_REPO_BASE = "https://huggingface.co/SamKulkarni/stock-models/resolve/main"
+
+MODEL_FILES = {
+    "cnn_bilstm_att_model.keras": f"{HF_REPO_BASE}/cnn_bilstm_att_model.keras",
+    "scalers.pkl": f"{HF_REPO_BASE}/scalers.pkl",
+    "feature_cols.pkl": f"{HF_REPO_BASE}/feature_cols.pkl",
+    "ppo_agent.zip": f"{HF_REPO_BASE}/ppo_agent.zip",
+}
+
+def download_file(url: str, dest: Path):
+    """Download a file from URL to destination if it doesn't exist."""
+    if dest.exists():
+        print(f"✅ {dest.name} already exists, skipping download.")
+        return
+    print(f"⬇️ Downloading {dest.name} from Hugging Face...")
+    try:
+        response = requests.get(url, stream=True, timeout=60)
+        response.raise_for_status()
+        with open(dest, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print(f"✅ Downloaded {dest.name}")
+    except Exception as e:
+        print(f"❌ Failed to download {dest.name}: {e}")
+        raise
+
+# Download all models
+for filename, url in MODEL_FILES.items():
+    download_file(url, MODEL_DIR / filename)
+
+# ---------- Load Models ----------
+MODEL_PATH = MODEL_DIR / "cnn_bilstm_att_model.keras"
+SCALER_PATH = MODEL_DIR / "scalers.pkl"
+FEATURE_COLS_PATH = MODEL_DIR / "feature_cols.pkl"
+PPO_PATH = MODEL_DIR / "ppo_agent.zip"
+
+model = keras.models.load_model(str(MODEL_PATH), custom_objects={'AttentionLayer': AttentionLayer})
 with open(SCALER_PATH, "rb") as f: scalers = pickle.load(f)
 with open(FEATURE_COLS_PATH, "rb") as f: feature_cols = pickle.load(f)
-ppo_agent = PPO.load(PPO_PATH)
+ppo_agent = PPO.load(str(PPO_PATH))
 
 print("✅ Models loaded successfully.")
 
