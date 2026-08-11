@@ -12,3 +12,4 @@ gymnasium
 pandas
 numpy
 scikit-learn
+requests>=2.25.0
