@@ -105,16 +105,15 @@ feature_cols = None
 ppo_agent = None
 
 # ---------- LIFESPAN: Startup & Shutdown ----------
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+def _load_models_blocking():
+    """Runs in a background thread so it never blocks uvicorn's port binding."""
     global model, scalers, feature_cols, ppo_agent
-    
-    print("🚀 Starting up: downloading and loading models...")
-    
+
+    print("🚀 Background load: downloading and loading models...")
+
     MODEL_DIR = Path("paper_results")
     MODEL_DIR.mkdir(exist_ok=True)
-    
-    # Correct raw download URLs
+
     HF_REPO_BASE = "https://huggingface.co/SamKulkarni/stock-models/resolve/main"
     MODEL_FILES = {
         "cnn_bilstm_att_model.keras": f"{HF_REPO_BASE}/cnn_bilstm_att_model.keras",
@@ -122,7 +121,7 @@ async def lifespan(app: FastAPI):
         "feature_cols.pkl": f"{HF_REPO_BASE}/feature_cols.pkl",
         "ppo_agent.zip": f"{HF_REPO_BASE}/ppo_agent.zip",
     }
-    
+
     def download_file(url, dest):
         if dest.exists():
             print(f"✅ {dest.name} already exists, skipping download.")
@@ -138,21 +137,39 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"❌ Failed to download {dest.name}: {e}")
             raise
-    
-    for filename, url in MODEL_FILES.items():
-        download_file(url, MODEL_DIR / filename)
-    
-    # Load models
-    print("Loading models...")
-    model = keras.models.load_model(str(MODEL_DIR / "cnn_bilstm_att_model.keras"),
-                                    custom_objects={'AttentionLayer': AttentionLayer})
-    with open(MODEL_DIR / "scalers.pkl", "rb") as f:
-        scalers = pickle.load(f)
-    with open(MODEL_DIR / "feature_cols.pkl", "rb") as f:
-        feature_cols = pickle.load(f)
-    ppo_agent = PPO.load(str(MODEL_DIR / "ppo_agent.zip"))
-    
-    print("✅ All models loaded successfully.")
+
+    try:
+        for filename, url in MODEL_FILES.items():
+            download_file(url, MODEL_DIR / filename)
+
+        print("Loading models...")
+        model = keras.models.load_model(str(MODEL_DIR / "cnn_bilstm_att_model.keras"),
+                                        custom_objects={'AttentionLayer': AttentionLayer})
+        with open(MODEL_DIR / "scalers.pkl", "rb") as f:
+            scalers = pickle.load(f)
+        with open(MODEL_DIR / "feature_cols.pkl", "rb") as f:
+            feature_cols = pickle.load(f)
+        ppo_agent = PPO.load(str(MODEL_DIR / "ppo_agent.zip"))
+
+        print("✅ All models loaded successfully.")
+    except Exception as e:
+        # Don't crash the whole app if model loading fails - endpoints already
+        # return 503 while model is None, so surface the error and keep serving.
+        print(f"❌ Model loading failed: {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Kick off the heavy download/load in a background thread so uvicorn can
+    # bind the port and start accepting connections immediately. Render's
+    # deploy scanner only waits for an open port, not for the app to be
+    # "fully ready" - if we block here, the scanner times out before uvicorn
+    # ever starts listening, and the deploy is marked failed.
+    import asyncio
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _load_models_blocking)
+
+    print("🚀 App startup complete, port is live. Models loading in background.")
     yield
     print("🛑 Shutting down...")
 
