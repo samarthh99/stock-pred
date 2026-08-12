@@ -25,9 +25,6 @@ from database import SessionLocal, engine, Base
 from models import User, TradingSession
 from auth import verify_password, get_password_hash, create_access_token, decode_access_token
 
-# ---------- Create tables ----------
-Base.metadata.create_all(bind=engine)
-
 # ---------- Custom Attention Layer ----------
 class AttentionLayer(keras.layers.Layer):
     def __init__(self):
@@ -109,7 +106,16 @@ def _load_models_blocking():
     """Runs in a background thread so it never blocks uvicorn's port binding."""
     global model, scalers, feature_cols, ppo_agent
 
-    print("🚀 Background load: downloading and loading models...")
+    print("🚀 Background load: creating DB tables and loading models...")
+
+    try:
+        Base.metadata.create_all(bind=engine)
+        print("✅ DB tables ready.")
+    except Exception as e:
+        # Auth/signup/login endpoints will fail until this succeeds, but we
+        # don't want a slow/unreachable DB to block the whole app from
+        # starting - prediction endpoints don't depend on the DB.
+        print(f"❌ DB table creation failed: {e}")
 
     MODEL_DIR = Path("paper_results")
     MODEL_DIR.mkdir(exist_ok=True)
