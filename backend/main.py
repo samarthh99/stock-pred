@@ -15,17 +15,17 @@ from stable_baselines3 import PPO
 import warnings
 warnings.filterwarnings('ignore')
 
-# ---------- Add these new imports ----------
+# ---------- New imports for lifespan ----------
+from contextlib import asynccontextmanager
 import requests
 from pathlib import Path
-import shutil
 
 # ---------- Local imports ----------
 from database import SessionLocal, engine, Base
 from models import User, TradingSession
 from auth import verify_password, get_password_hash, create_access_token, decode_access_token
 
-# ---------- Create tables (if not exist) ----------
+# ---------- Create tables ----------
 Base.metadata.create_all(bind=engine)
 
 # ---------- Custom Attention Layer ----------
@@ -47,7 +47,7 @@ class AttentionLayer(keras.layers.Layer):
         context = tf.reduce_sum(context, axis=1)
         return context, alpha
 
-# ---------- Feature Engineering (full, same as training) ----------
+# ---------- Feature Engineering ----------
 def engineer_features_no_lookahead(df):
     df = df.copy()
     for d in [1, 5, 10, 20]:
@@ -98,63 +98,75 @@ def engineer_features_no_lookahead(df):
     df = df.replace([np.inf, -np.inf], np.nan).dropna()
     return df
 
-# ============================================================
-# NEW: Download models from Hugging Face if missing
-# ============================================================
-MODEL_DIR = Path("paper_results")
-MODEL_DIR.mkdir(exist_ok=True)
+# ---------- Global variables (set later) ----------
+model = None
+scalers = None
+feature_cols = None
+ppo_agent = None
 
-# Replace with your actual Hugging Face repo URL
-HF_REPO_BASE = "https://huggingface.co/SamKulkarni/stock-models/resolve/main"
-
-MODEL_FILES = {
-    "cnn_bilstm_att_model.keras": f"{HF_REPO_BASE}/cnn_bilstm_att_model.keras",
-    "scalers.pkl": f"{HF_REPO_BASE}/scalers.pkl",
-    "feature_cols.pkl": f"{HF_REPO_BASE}/feature_cols.pkl",
-    "ppo_agent.zip": f"{HF_REPO_BASE}/ppo_agent.zip",
-}
-
-def download_file(url: str, dest: Path):
-    """Download a file from URL to destination if it doesn't exist."""
-    if dest.exists():
-        print(f"✅ {dest.name} already exists, skipping download.")
-        return
-    print(f"⬇️ Downloading {dest.name} from Hugging Face...")
-    try:
-        response = requests.get(url, stream=True, timeout=60)
-        response.raise_for_status()
-        with open(dest, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        print(f"✅ Downloaded {dest.name}")
-    except Exception as e:
-        print(f"❌ Failed to download {dest.name}: {e}")
-        raise
-
-# Download all models
-for filename, url in MODEL_FILES.items():
-    download_file(url, MODEL_DIR / filename)
-
-# ---------- Load Models ----------
-MODEL_PATH = MODEL_DIR / "cnn_bilstm_att_model.keras"
-SCALER_PATH = MODEL_DIR / "scalers.pkl"
-FEATURE_COLS_PATH = MODEL_DIR / "feature_cols.pkl"
-PPO_PATH = MODEL_DIR / "ppo_agent.zip"
-
-model = keras.models.load_model(str(MODEL_PATH), custom_objects={'AttentionLayer': AttentionLayer})
-with open(SCALER_PATH, "rb") as f: scalers = pickle.load(f)
-with open(FEATURE_COLS_PATH, "rb") as f: feature_cols = pickle.load(f)
-ppo_agent = PPO.load(str(PPO_PATH))
-
-print("✅ Models loaded successfully.")
+# ---------- LIFESPAN: Startup & Shutdown ----------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global model, scalers, feature_cols, ppo_agent
+    
+    print("🚀 Starting up: downloading and loading models...")
+    
+    MODEL_DIR = Path("paper_results")
+    MODEL_DIR.mkdir(exist_ok=True)
+    
+    # Correct raw download URLs
+    HF_REPO_BASE = "https://huggingface.co/SamKulkarni/stock-models/resolve/main"
+    MODEL_FILES = {
+        "cnn_bilstm_att_model.keras": f"{HF_REPO_BASE}/cnn_bilstm_att_model.keras",
+        "scalers.pkl": f"{HF_REPO_BASE}/scalers.pkl",
+        "feature_cols.pkl": f"{HF_REPO_BASE}/feature_cols.pkl",
+        "ppo_agent.zip": f"{HF_REPO_BASE}/ppo_agent.zip",
+    }
+    
+    def download_file(url, dest):
+        if dest.exists():
+            print(f"✅ {dest.name} already exists, skipping download.")
+            return
+        print(f"⬇️ Downloading {dest.name} from Hugging Face...")
+        try:
+            response = requests.get(url, stream=True, timeout=120)
+            response.raise_for_status()
+            with open(dest, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            print(f"✅ Downloaded {dest.name}")
+        except Exception as e:
+            print(f"❌ Failed to download {dest.name}: {e}")
+            raise
+    
+    for filename, url in MODEL_FILES.items():
+        download_file(url, MODEL_DIR / filename)
+    
+    # Load models
+    print("Loading models...")
+    model = keras.models.load_model(str(MODEL_DIR / "cnn_bilstm_att_model.keras"),
+                                    custom_objects={'AttentionLayer': AttentionLayer})
+    with open(MODEL_DIR / "scalers.pkl", "rb") as f:
+        scalers = pickle.load(f)
+    with open(MODEL_DIR / "feature_cols.pkl", "rb") as f:
+        feature_cols = pickle.load(f)
+    ppo_agent = PPO.load(str(MODEL_DIR / "ppo_agent.zip"))
+    
+    print("✅ All models loaded successfully.")
+    yield
+    print("🛑 Shutting down...")
 
 # ---------- FastAPI App ----------
-app = FastAPI(title="Stock Prediction & Trading API", version="1.0")
+app = FastAPI(
+    title="Stock Prediction & Trading API",
+    version="1.0",
+    lifespan=lifespan  # Critical: attaches the startup/shutdown events
+)
 
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict to your domain in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -215,6 +227,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 # ---------- Helper: CNN probability ----------
 def get_cnn_prob(symbol: str):
+    global model, scalers, feature_cols
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded yet")
     end_date = datetime.today()
     start_date = end_date - timedelta(days=200)
     df = yf.download(symbol, start=start_date, end=end_date, progress=False, auto_adjust=True)
@@ -260,7 +275,6 @@ def predict(request: PredictRequest, current_user: User = Depends(get_current_us
     symbol = request.symbol.upper()
     prob, df_eng = get_cnn_prob(symbol)
     signal = "BUY" if prob > 0.6 else "SELL" if prob < 0.4 else "HOLD"
-    # Generate explanation
     if signal == "BUY":
         explanation = f"Model expects {symbol} to outperform its sector over the next 5 days with {prob:.1%} confidence. Consider buying."
     elif signal == "SELL":
@@ -278,9 +292,11 @@ def predict(request: PredictRequest, current_user: User = Depends(get_current_us
 # ---------- Trading Endpoint ----------
 @app.post("/trade", response_model=TradeResponse)
 def trade(request: TradeRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    global ppo_agent
+    if ppo_agent is None:
+        raise HTTPException(status_code=503, detail="PPO agent not loaded yet")
     symbol = request.symbol.upper()
     
-    # Get or create trading session for this user & symbol
     session = db.query(TradingSession).filter(
         TradingSession.user_id == current_user.id,
         TradingSession.symbol == symbol
@@ -291,14 +307,11 @@ def trade(request: TradeRequest, current_user: User = Depends(get_current_user),
         db.commit()
         db.refresh(session)
     
-    # Update session with current state (from request)
     session.balance = request.balance
     session.shares = request.shares
     session.idx = request.idx
     db.commit()
 
-    # ---------- Compute PPO action ----------
-    # Fetch historical data for returns & volatility
     end_date = datetime.today()
     start_date = end_date - timedelta(days=300)
     df = yf.download(symbol, start=start_date, end=end_date, progress=False, auto_adjust=True)
@@ -316,13 +329,11 @@ def trade(request: TradeRequest, current_user: User = Depends(get_current_user),
     norm_base = closes[start_idx]
     price = closes[start_idx + idx]
     if abs(price - request.current_price) > 0.05 * price:
-        price = request.current_price  # use provided price if close enough
+        price = request.current_price
 
-    # Returns
     ret_1d = (price - closes[start_idx + idx - 1]) / (closes[start_idx + idx - 1] + 1e-8) if idx > 0 else 0.0
     ret_5d = (price - closes[start_idx + idx - 5]) / (closes[start_idx + idx - 5] + 1e-8) if idx >= 5 else 0.0
 
-    # Volatility (20-day)
     if idx >= 20:
         prices_window = closes[start_idx:start_idx + idx + 1]
         if len(prices_window) > 1:
@@ -333,10 +344,8 @@ def trade(request: TradeRequest, current_user: User = Depends(get_current_user),
     else:
         vol = 0.0
 
-    # CNN probability
     prob, _ = get_cnn_prob(symbol)
 
-    # Portfolio state
     initial_balance = 10000.0
     pos = (request.shares * price) / initial_balance
     bal = request.balance / initial_balance
@@ -344,7 +353,6 @@ def trade(request: TradeRequest, current_user: User = Depends(get_current_user),
     portfolio = request.balance + request.shares * price
     port_ret = (portfolio - initial_balance) / initial_balance
 
-    # Build observation
     obs = np.array([
         price / norm_base,
         ret_1d,
@@ -358,21 +366,18 @@ def trade(request: TradeRequest, current_user: User = Depends(get_current_user),
         0.0
     ], dtype=np.float32)
 
-    # PPO prediction
     action, _ = ppo_agent.predict(obs, deterministic=True)
     action = int(action)
     action_names = {0: "HOLD", 1: "BUY", 2: "SELL"}
     action_name = action_names[action]
 
-    # Generate explanation
     if action == 0:
         explanation = "PPO agent recommends HOLD. No clear action – maintain current holdings."
     elif action == 1:
         explanation = f"PPO agent recommends BUY based on current portfolio and model signal. The model sees upside potential."
-    else:  # SELL
+    else:
         explanation = f"PPO agent recommends SELL based on current portfolio and model signal. The model sees downside risk or profit-taking opportunity."
 
-    # Return response
     return TradeResponse(
         action=action,
         action_name=action_name,
@@ -383,4 +388,7 @@ def trade(request: TradeRequest, current_user: User = Depends(get_current_user),
 # ---------- Health check ----------
 @app.get("/health")
 def health():
+    global scalers
+    if scalers is None:
+        return {"status": "loading", "message": "Models are still loading"}
     return {"status": "ok", "symbols": list(scalers.keys())}
