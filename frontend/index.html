@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📈 Stock AI – Predict & Trade</title>
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Custom styles -->
+    <style>
+        /* ---------- Violet/Black Theme ---------- */
+        body {
+            background: #0a0a0f;
+            color: #e0e0e0;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+        .glass {
+            background: rgba(20, 20, 30, 0.8);
+            backdrop-filter: blur(8px);
+            border: 1px solid #4a2b6b;
+        }
+        .violet-glow {
+            box-shadow: 0 0 30px rgba(120, 50, 200, 0.2);
+        }
+        .btn-violet {
+            background: #7c3aed;
+            transition: all 0.2s ease;
+        }
+        .btn-violet:hover {
+            background: #6d28d9;
+            transform: scale(1.02);
+        }
+        .btn-violet:active {
+            transform: scale(0.98);
+        }
+        .card {
+            background: #14141e;
+            border-radius: 1.5rem;
+            padding: 1.75rem;
+            border: 1px solid #2a1a3a;
+            transition: border-color 0.2s;
+        }
+        .card:hover {
+            border-color: #4a2b6b;
+        }
+        input, select {
+            background: #1e1e2a;
+            border: 1px solid #3a2a4a;
+            color: #e0e0e0;
+            padding: 0.6rem 1rem;
+            border-radius: 0.75rem;
+            outline: none;
+            transition: border 0.2s;
+            width: 100%;
+        }
+        input:focus, select:focus {
+            border-color: #7c3aed;
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
+        }
+        input::placeholder {
+            color: #6b6b7b;
+        }
+        .signal-buy { color: #4ade80; }
+        .signal-sell { color: #f87171; }
+        .signal-hold { color: #fbbf24; }
+        .tab-active {
+            border-bottom: 2px solid #7c3aed;
+            color: #c4b5fd;
+        }
+        .tab-inactive {
+            border-bottom: 2px solid transparent;
+            color: #6b6b7b;
+        }
+        .auth-form {
+            transition: opacity 0.3s ease;
+        }
+        .hidden-form {
+            display: none;
+        }
+        .spinner {
+            border: 2px solid #2a1a3a;
+            border-top: 2px solid #7c3aed;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .result-box {
+            background: #0d0d16;
+            border-radius: 0.75rem;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        .explanation {
+            font-size: 0.95rem;
+            color: #b0b0c0;
+            border-left: 3px solid #7c3aed;
+            padding-left: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app" class="min-h-screen flex items-center justify-center p-4">
+    <!-- ====== AUTH CONTAINER ====== -->
+    <div id="authContainer" class="w-full max-w-md">
+        <div class="card violet-glow">
+            <h1 class="text-3xl font-bold text-center text-violet-400 mb-2">📈 Stock AI</h1>
+            <p class="text-center text-gray-400 text-sm mb-6">Predict & Trade with Deep Learning + PPO</p>
+
+            <!-- Tabs -->
+            <div id="authTabs" class="flex mb-6 border-b border-violet-800">
+                <button class="tab-btn flex-1 py-2 text-center tab-active" data-tab="login">Login</button>
+                <button class="tab-btn flex-1 py-2 text-center tab-inactive" data-tab="signup">Sign Up</button>
+            </div>
+
+            <!-- Login Form -->
+            <form id="loginForm" class="auth-form">
+                <input type="text" id="loginUsername" placeholder="Username" class="mb-3" required>
+                <input type="password" id="loginPassword" placeholder="Password" class="mb-4" required>
+                <button type="submit" class="btn-violet w-full py-2.5 rounded-lg font-semibold">Login</button>
+                <div id="loginError" class="text-red-400 text-sm mt-2"></div>
+            </form>
+
+            <!-- Signup Form -->
+            <form id="signupForm" class="auth-form hidden-form">
+                <input type="text" id="signupUsername" placeholder="Choose a username" class="mb-3" required>
+                <input type="password" id="signupPassword" placeholder="Choose a password" class="mb-4" required>
+                <button type="submit" class="btn-violet w-full py-2.5 rounded-lg font-semibold">Create Account</button>
+                <div id="signupError" class="text-red-400 text-sm mt-2"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ====== MAIN DASHBOARD ====== -->
+    <div id="mainContainer" class="hidden w-full max-w-5xl">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-bold text-violet-400">📊 Dashboard</h1>
+                <p class="text-gray-400 text-sm">Welcome, <span id="userDisplay">User</span></p>
+            </div>
+            <button id="logoutBtn" class="text-gray-400 hover:text-white transition px-4 py-2 rounded-lg border border-gray-700 hover:border-gray-500">Logout</button>
+        </div>
+
+        <!-- Two-column grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Prediction Card -->
+            <div class="card">
+                <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+                    <span>🔮</span> 5‑Day Outperformance
+                </h2>
+                <div class="flex gap-2">
+                    <input type="text" id="symbolInput" placeholder="Symbol (e.g., AAPL)" class="flex-1">
+                    <button id="predictBtn" class="btn-violet px-5 py-2 rounded-lg font-medium">Predict</button>
+                </div>
+                <div id="predictionResult" class="result-box space-y-2">
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Probability</span>
+                        <span id="probDisplay" class="font-mono">—</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Signal</span>
+                        <span id="signalDisplay" class="font-bold">—</span>
+                    </div>
+                    <div class="explanation">
+                        <span class="text-gray-400">Why?</span>
+                        <span id="explanationDisplay">—</span>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1" id="dateDisplay"></div>
+                </div>
+            </div>
+
+            <!-- Trade Action Card -->
+            <div class="card">
+                <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+                    <span>🤖</span> PPO Trading Action
+                </h2>
+                <div class="grid grid-cols-2 gap-3 text-sm">
+                    <label class="text-gray-400">Current Price</label>
+                    <input type="number" id="tradePrice" value="185" step="0.01">
+                    <label class="text-gray-400">Balance ($)</label>
+                    <input type="number" id="tradeBalance" value="10000" step="0.01">
+                    <label class="text-gray-400">Shares Held</label>
+                    <input type="number" id="tradeShares" value="0" step="1">
+                    <label class="text-gray-400">Step (idx)</label>
+                    <input type="number" id="tradeIdx" value="0" min="0" max="99">
+                </div>
+                <button id="tradeBtn" class="btn-violet w-full mt-4 py-2.5 rounded-lg font-medium">Get Action</button>
+                <div id="tradeResult" class="result-box space-y-2">
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Action</span>
+                        <span id="actionDisplay" class="font-bold">—</span>
+                    </div>
+                    <div class="explanation">
+                        <span class="text-gray-400">Why?</span>
+                        <span id="tradeExplanation">—</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer note -->
+        <div class="mt-8 text-center text-xs text-gray-500 border-t border-gray-800 pt-4">
+            Predictions based on CNN‑BiLSTM‑Attention (62 features, 60‑day window) • Trading agent: PPO (100‑day episodes)
+        </div>
+    </div>
+</div>
+
+<!-- ====== JAVASCRIPT ====== -->
+<script>
+    // ---------- Configuration ----------
+    const API_BASE = 'http://localhost:8000'; // <-- Change to your Render backend URL
+
+    // ---------- DOM refs ----------
+    const authContainer = document.getElementById('authContainer');
+    const mainContainer = document.getElementById('mainContainer');
+    const loginForm = document.getElementById('loginForm');
+    const signupForm = document.getElementById('signupForm');
+    const loginError = document.getElementById('loginError');
+    const signupError = document.getElementById('signupError');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const userDisplay = document.getElementById('userDisplay');
+    const symbolInput = document.getElementById('symbolInput');
+    const predictBtn = document.getElementById('predictBtn');
+    const probDisplay = document.getElementById('probDisplay');
+    const signalDisplay = document.getElementById('signalDisplay');
+    const explanationDisplay = document.getElementById('explanationDisplay');
+    const dateDisplay = document.getElementById('dateDisplay');
+    const tradeBtn = document.getElementById('tradeBtn');
+    const actionDisplay = document.getElementById('actionDisplay');
+    const tradeExplanation = document.getElementById('tradeExplanation');
+
+    let token = null;
+
+    // ---------- Tab switching ----------
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.remove('tab-active', 'tab-inactive');
+                b.classList.add('tab-inactive');
+            });
+            this.classList.remove('tab-inactive');
+            this.classList.add('tab-active');
+            const tab = this.dataset.tab;
+            document.getElementById('loginForm').classList.toggle('hidden-form', tab !== 'login');
+            document.getElementById('signupForm').classList.toggle('hidden-form', tab !== 'signup');
+        });
+    });
+
+    // ---------- Auth helpers ----------
+    function showMain(username) {
+        authContainer.classList.add('hidden');
+        mainContainer.classList.remove('hidden');
+        userDisplay.textContent = username || 'User';
+    }
+
+    function showAuth() {
+        authContainer.classList.remove('hidden');
+        mainContainer.classList.add('hidden');
+        token = null;
+        localStorage.removeItem('token');
+    }
+
+    // ---------- Login ----------
+    loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        loginError.textContent = '';
+        const username = document.getElementById('loginUsername').value;
+        const password = document.getElementById('loginPassword').value;
+        try {
+            const res = await fetch(`${API_BASE}/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ username, password })
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                loginError.textContent = err.detail || 'Login failed';
+                return;
+            }
+            const data = await res.json();
+            token = data.access_token;
+            localStorage.setItem('token', token);
+            showMain(username);
+        } catch (err) {
+            loginError.textContent = 'Network error. Is the backend running?';
+        }
+    });
+
+    // ---------- Signup ----------
+    signupForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        signupError.textContent = '';
+        const username = document.getElementById('signupUsername').value;
+        const password = document.getElementById('signupPassword').value;
+        try {
+            const res = await fetch(`${API_BASE}/signup`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                signupError.textContent = err.detail || 'Signup failed';
+                return;
+            }
+            const data = await res.json();
+            token = data.access_token;
+            localStorage.setItem('token', token);
+            showMain(username);
+        } catch (err) {
+            signupError.textContent = 'Network error. Is the backend running?';
+        }
+    });
+
+    // ---------- Logout ----------
+    logoutBtn.addEventListener('click', () => {
+        showAuth();
+    });
+
+    // ---------- Auto‑login on load ----------
+    window.onload = function() {
+        const saved = localStorage.getItem('token');
+        if (saved) {
+            token = saved;
+            // We don't validate the token here; if invalid, backend will reject requests.
+            // For UX, we could call /health and check, but we'll just show dashboard.
+            // The user can still try to predict; if 401, we'll redirect to login.
+            showMain('User');
+        }
+    };
+
+    // ---------- Prediction ----------
+    predictBtn.addEventListener('click', async () => {
+        const symbol = symbolInput.value.trim().toUpperCase();
+        if (!symbol) return alert('Please enter a stock symbol.');
+        try {
+            const res = await fetch(`${API_BASE}/predict`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ symbol })
+            });
+            if (res.status === 401) {
+                showAuth();
+                return;
+            }
+            if (!res.ok) {
+                const err = await res.json();
+                alert(err.detail || 'Prediction failed');
+                return;
+            }
+            const data = await res.json();
+            probDisplay.textContent = (data.probability * 100).toFixed(2) + '%';
+            signalDisplay.textContent = data.signal;
+            signalDisplay.className = `font-bold signal-${data.signal.toLowerCase()}`;
+            explanationDisplay.textContent = data.explanation;
+            dateDisplay.textContent = `Data as of: ${data.as_of_date}`;
+        } catch (err) {
+            alert('Network error');
+        }
+    });
+
+    // ---------- PPO Trade Action ----------
+    tradeBtn.addEventListener('click', async () => {
+        const symbol = symbolInput.value.trim().toUpperCase();
+        if (!symbol) return alert('Enter a symbol in the prediction field first.');
+        const payload = {
+            symbol: symbol,
+            current_price: parseFloat(document.getElementById('tradePrice').value),
+            balance: parseFloat(document.getElementById('tradeBalance').value),
+            shares: parseInt(document.getElementById('tradeShares').value),
+            idx: parseInt(document.getElementById('tradeIdx').value)
+        };
+        try {
+            const res = await fetch(`${API_BASE}/trade`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(payload)
+            });
+            if (res.status === 401) {
+                showAuth();
+                return;
+            }
+            if (!res.ok) {
+                const err = await res.json();
+                alert(err.detail || 'Trade action failed');
+                return;
+            }
+            const data = await res.json();
+            actionDisplay.textContent = data.action_name;
+            actionDisplay.className = `font-bold signal-${data.action_name.toLowerCase()}`;
+            tradeExplanation.textContent = data.explanation;
+        } catch (err) {
+            alert('Network error');
+        }
+    });
+
+    // ---------- Press Enter to trigger prediction/trade ----------
+    symbolInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') predictBtn.click();
+    });
+    document.querySelectorAll('#tradePrice, #tradeBalance, #tradeShares, #tradeIdx').forEach(inp => {
+        inp.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') tradeBtn.click();
+        });
+    });
+</script>
+</body>
+</html>
