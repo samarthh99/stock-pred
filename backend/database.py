@@ -22,9 +22,14 @@ if ca_cert:
         ca_path = f.name
     ssl_args = {"ssl": {"ca": ca_path}}
 
+# connect_timeout ensures a bad/unreachable DB fails fast (seconds) instead of
+# hanging indefinitely - important because engine creation and the first
+# connection attempt can happen during app startup.
+connect_args = {**ssl_args, "connect_timeout": 10}
+
 engine = create_engine(
     DATABASE_URL,
-    connect_args=ssl_args,
+    connect_args=connect_args,
     pool_pre_ping=True
 )
 
